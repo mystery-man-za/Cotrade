@@ -17,8 +17,8 @@
 
 //--- Input parameters
 input group "=== Bridge Connection Settings ==="
-input string   InpBridgeUrl         = "http://127.0.0.1:7777"; // Primary Bridge URL (WebRequest whitelist)
-input string   InpBridgeUrlFallback = "http://127.0.0.1:3000/api/mt5"; // Fallback URL (if on port 3000)
+input string   InpBridgeUrl         = "http://127.0.0.1:3000"; // Primary Bridge URL (Unified Port 3000)
+input string   InpBridgeUrlFallback = "http://127.0.0.1:7777"; // Fallback URL (Port 7777)
 input string   InpApiKey            = "mt5_bridge_secret_key"; // Bridge API Secret
 input int      InpTimerIntervalMs   = 500;                     // Polling & sync interval (milliseconds)
 
@@ -26,6 +26,7 @@ input group "=== Trade & Execution Parameters ==="
 input ulong    InpMagicNumber       = 889900;                  // EA Magic Number for AI Orders
 input ulong    InpDefaultSlippage   = 10;                      // Slippage points
 input string   InpSymbolsToTrack    = "EURUSD,GBPUSD,USDJPY,XAUUSD,BTCUSD"; // Symbols for live stream (comma-separated)
+input int      InpHistoryCandles    = 60;                      // Past chart candles (OHLCV) to transmit
 
 input group "=== Trailing Stop & Risk Guard ==="
 input bool     InpEnableTrailing    = true;                    // Enable Trailing Stop Engine
@@ -284,6 +285,14 @@ string BuildSyncJson()
       }
    }
    json += "],";
+
+   // Chart History (transmits past candles on startup and every 5 seconds)
+   static datetime s_lastHistorySend = 0;
+   if(TimeCurrent() - s_lastHistorySend >= 5)
+   {
+      s_lastHistorySend = TimeCurrent();
+      json += "\"chartHistory\":" + BuildChartHistoryJson(InpHistoryCandles) + ",";
+   }
 
    // Account Info
    json += "\"account\":{";
@@ -605,7 +614,35 @@ void ExecuteSingleCommand(string cmd)
 }
 
 //+------------------------------------------------------------------+
-//| Extract field value from simple flat JSON string                 |
+//| Build JSON array of past OHLCV chart history candles             |
+//+------------------------------------------------------------------+
+string BuildChartHistoryJson(int count)
+{
+   if(count <= 0) count = 60;
+   MqlRates rates[];
+   ArraySetAsSeries(rates, false); // Oldest to newest chronological
+   int copied = CopyRates(_Symbol, Period(), 0, count, rates);
+   if(copied <= 0) return "[]";
+
+   string json = "[";
+   for(int i = 0; i < copied; i++)
+   {
+      if(i > 0) json += ",";
+      json += "{";
+      json += "\"time\":" + IntegerToString((long)rates[i].time) + ",";
+      json += "\"open\":" + DoubleToString(rates[i].open, _Digits) + ",";
+      json += "\"high\":" + DoubleToString(rates[i].high, _Digits) + ",";
+      json += "\"low\":" + DoubleToString(rates[i].low, _Digits) + ",";
+      json += "\"close\":" + DoubleToString(rates[i].close, _Digits) + ",";
+      json += "\"volume\":" + IntegerToString((long)rates[i].tick_volume);
+      json += "}";
+   }
+   json += "]";
+   return json;
+}
+
+//+------------------------------------------------------------------+
+//| Extract field value from simple flat JSON string (Safe parser)   |
 //+------------------------------------------------------------------+
 string ExtractJsonField(string json, string key)
 {
@@ -613,20 +650,25 @@ string ExtractJsonField(string json, string key)
    int pos = StringFind(json, needle);
    if(pos == -1) return "";
 
-   int start = pos + StringLen(needle);
-   while(start < StringLen(json) && (StringGetCharacter(json, start) == ' ' || StringGetCharacter(json, start) == '\"'))
+   int p = pos + StringLen(needle);
+   int len = StringLen(json);
+   while(p < len && StringGetCharacter(json, p) == ' ') p++;
+   if(p >= len) return "";
+
+   bool inQuotes = false;
+   if(StringGetCharacter(json, p) == '\"')
    {
-      start++;
+      inQuotes = true;
+      p++;
    }
 
-   int end = start;
-   bool inQuotes = (StringGetCharacter(json, pos + StringLen(needle)) == '\"' || StringGetCharacter(json, pos + StringLen(needle) + 1) == '\"');
-   
-   while(end < StringLen(json))
+   int start = p;
+   int end = p;
+   while(end < len)
    {
       ushort c = StringGetCharacter(json, end);
       if(inQuotes && c == '\"') break;
-      if(!inQuotes && (c == ',' || c == '}' || c == ']' || c == '\r' || c == '\n')) break;
+      if(!inQuotes && (c == ',' || c == '}' || c == ']' || c == '\r' || c == '\n' || c == ' ')) break;
       end++;
    }
 

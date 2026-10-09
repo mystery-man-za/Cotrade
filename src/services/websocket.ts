@@ -104,6 +104,7 @@ export function useBridgeData() {
                       ticks: sync.ticks || prev.ticks,
                       currentChart: sync.currentChart !== undefined ? sync.currentChart : prev.currentChart,
                       allSymbols: sync.allSymbols || prev.allSymbols,
+                      chartHistory: sync.chartHistory && sync.chartHistory.length > 0 ? sync.chartHistory : prev.chartHistory,
                       connection: sync.connection
                         ? { ...prev.connection, ...sync.connection }
                         : {

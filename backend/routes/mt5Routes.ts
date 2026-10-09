@@ -37,6 +37,7 @@ mt5Router.post(['/sync', '/api/mt5/sync'], (req, res) => {
       ticks: tradeStore.getTicks(),
       currentChart: tradeStore.getCurrentChart(),
       allSymbols: tradeStore.getAllSymbols(),
+      chartHistory: tradeStore.getChartHistory(),
       connection: tradeStore.getState().connection,
       isEaConnected: true,
       lastEaSync: Date.now(),

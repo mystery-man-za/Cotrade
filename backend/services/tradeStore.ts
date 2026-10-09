@@ -1,5 +1,6 @@
 import {
   AccountInfo,
+  CandleData,
   ChartSymbolInfo,
   CommandStatus,
   DetailedSymbolInfo,
@@ -76,6 +77,7 @@ class TradeStore {
   private terminalBuild: number = 0;
   private currentChart: ChartSymbolInfo | null = null;
   private allSymbols: DetailedSymbolInfo[] = [];
+  private chartHistory: CandleData[] = [];
 
   // Track tick movement history for charts (populated by live MT5 tick updates)
   private tickHistory: Map<string, { time: number; bid: number; ask: number }[]> = new Map();
@@ -113,6 +115,9 @@ class TradeStore {
     }
     if (Array.isArray(payload.allSymbols)) {
       this.allSymbols = payload.allSymbols;
+    }
+    if (Array.isArray(payload.chartHistory) && payload.chartHistory.length > 0) {
+      this.chartHistory = payload.chartHistory;
     }
 
     // 1. Update Account Info
@@ -463,6 +468,7 @@ class TradeStore {
       },
       currentChart: this.currentChart,
       allSymbols: this.allSymbols,
+      chartHistory: this.chartHistory,
       account: this.account,
       positions: Array.from(this.positions.values()),
       ticks: Array.from(this.ticks.values()),
@@ -479,6 +485,10 @@ class TradeStore {
 
   public getAllSymbols() {
     return this.allSymbols;
+  }
+
+  public getChartHistory() {
+    return this.chartHistory;
   }
 
   public getTicks() {

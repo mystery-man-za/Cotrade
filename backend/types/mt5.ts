@@ -141,6 +141,15 @@ export interface DetailedSymbolInfo {
   isCurrentChart?: boolean;
 }
 
+export interface CandleData {
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
 export interface EASyncPayload {
   apiKey: string;
   account: AccountInfo;
@@ -150,6 +159,7 @@ export interface EASyncPayload {
   mt5Time: number;
   currentChart?: ChartSymbolInfo;
   allSymbols?: DetailedSymbolInfo[];
+  chartHistory?: CandleData[];
   terminalName?: string;
   terminalCompany?: string;
   terminalBuild?: number;

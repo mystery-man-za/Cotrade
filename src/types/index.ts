@@ -140,6 +140,15 @@ export interface DetailedSymbolInfo {
   isCurrentChart?: boolean;
 }
 
+export interface CandleData {
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
 export interface AppState {
   connection: {
     isEaConnected: boolean;
@@ -157,6 +166,7 @@ export interface AppState {
   };
   currentChart: ChartSymbolInfo | null;
   allSymbols: DetailedSymbolInfo[];
+  chartHistory: CandleData[];
   account: AccountInfo;
   positions: Position[];
   ticks: TickData[];
