@@ -86,9 +86,9 @@ export const AllTrackedSymbolsTable: React.FC<AllTrackedSymbolsTableProps> = ({
                 <th className="py-2.5 px-3">Symbol</th>
                 <th className="py-2.5 px-3">Live Bid</th>
                 <th className="py-2.5 px-3">Live Ask</th>
-                <th className="py-2.5 px-3">Spread (pts)</th>
+                <th className="py-2.5 px-3">Spread</th>
+                <th className="py-2.5 px-3">24h / Session Range</th>
                 <th className="py-2.5 px-3">Min - Max Lot</th>
-                <th className="py-2.5 px-3">Lot Step</th>
                 <th className="py-2.5 px-3">Contract Size</th>
                 <th className="py-2.5 px-3">Trading</th>
                 <th className="py-2.5 px-3 text-right">Direct Actions</th>
@@ -98,6 +98,8 @@ export const AllTrackedSymbolsTable: React.FC<AllTrackedSymbolsTableProps> = ({
               {filtered.map((item) => {
                 const isSelected = selectedSymbol === item.symbol;
                 const digits = item.digits || (item.symbol.includes('JPY') ? 3 : 5);
+                const high = item.sessionHigh || item.high24h;
+                const low = item.sessionLow || item.low24h;
 
                 return (
                   <tr
@@ -126,10 +128,18 @@ export const AllTrackedSymbolsTable: React.FC<AllTrackedSymbolsTableProps> = ({
                       {item.spread} pts
                     </td>
                     <td className="py-2.5 px-3 text-slate-400">
-                      {item.minLot} - {item.maxLot}
+                      {high && low && high > 0 ? (
+                        <div className="text-[11px]">
+                          <span className="text-rose-400">{low.toFixed(digits)}</span>
+                          <span className="text-slate-600 mx-1">→</span>
+                          <span className="text-emerald-400">{high.toFixed(digits)}</span>
+                        </div>
+                      ) : (
+                        '—'
+                      )}
                     </td>
                     <td className="py-2.5 px-3 text-slate-400">
-                      {item.lotStep}
+                      {item.minLot} - {item.maxLot}
                     </td>
                     <td className="py-2.5 px-3 text-slate-400">
                       {item.contractSize.toLocaleString()}
@@ -155,7 +165,7 @@ export const AllTrackedSymbolsTable: React.FC<AllTrackedSymbolsTableProps> = ({
                         }`}
                       >
                         <Zap className="h-3 w-3" />
-                        <span>{isSelected ? 'Selected' : 'Direct Trade'}</span>
+                        <span>{isSelected ? 'Active Chart' : 'Select'}</span>
                       </button>
                     </td>
                   </tr>

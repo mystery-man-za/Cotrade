@@ -6,8 +6,11 @@ import {
   DetailedSymbolInfo,
   EASyncPayload,
   ExecutionLog,
+  MarketDepthItem,
+  PendingOrder,
   Position,
   RiskGuardConfig,
+  TechnicalIndicatorsResult,
   TickData,
   TradeCommand,
 } from '../types/mt5.js';
@@ -18,7 +21,15 @@ import {
   dbSaveRiskSettings,
   dbGetOrders,
   dbGetAnalytics,
+  dbInsertAccountSnapshot,
+  dbInsertCandles,
+  dbInsertTicks,
+  dbGetCandles,
+  dbGetTicksHistory,
+  dbGetAccountHistory,
+  pruneDatabase,
 } from '../database/db.js';
+import { calculateIndicators } from './indicatorEngine.js';
 
 class TradeStore {
   private account: AccountInfo = {
@@ -78,6 +89,9 @@ class TradeStore {
   private currentChart: ChartSymbolInfo | null = null;
   private allSymbols: DetailedSymbolInfo[] = [];
   private chartHistory: CandleData[] = [];
+  private pendingOrders: Map<number, PendingOrder> = new Map();
+  private marketDepth: Record<string, { bids: MarketDepthItem[]; asks: MarketDepthItem[] }> = {};
+  private indicators: TechnicalIndicatorsResult | null = null;
 
   // Track tick movement history for charts (populated by live MT5 tick updates)
   private tickHistory: Map<string, { time: number; bid: number; ask: number }[]> = new Map();
@@ -118,14 +132,33 @@ class TradeStore {
     }
     if (Array.isArray(payload.chartHistory) && payload.chartHistory.length > 0) {
       this.chartHistory = payload.chartHistory;
+      const currentSym = this.currentChart?.symbol || 'EURUSD';
+      const currentTf = this.currentChart?.timeframe || 'M1';
+      dbInsertCandles(currentSym, currentTf, payload.chartHistory).catch((e) =>
+        console.error('DB insert candles error:', e)
+      );
+      // Auto-compute indicators server-side
+      this.indicators = calculateIndicators(this.chartHistory, currentSym, currentTf);
     }
 
-    // 1. Update Account Info
+    // Process on-demand historical payload if returned from EA
+    if (payload.historyPayload && Array.isArray(payload.historyPayload.candles)) {
+      dbInsertCandles(
+        payload.historyPayload.symbol,
+        payload.historyPayload.timeframe,
+        payload.historyPayload.candles
+      ).catch((e) => console.error('DB insert on-demand history error:', e));
+    }
+
+    // 1. Update Account Info & Persist Snapshot
     if (payload.account) {
       this.account = {
         ...payload.account,
         lastUpdate: Date.now(),
       };
+      dbInsertAccountSnapshot(this.account).catch((e) =>
+        console.error('DB account snapshot error:', e)
+      );
     }
 
     // 2. Update Open Positions
@@ -136,8 +169,26 @@ class TradeStore {
       }
     }
 
-    // 3. Update Live Ticks
+    // 3. Update Pending Orders
+    if (Array.isArray(payload.pendingOrders)) {
+      this.pendingOrders.clear();
+      for (const po of payload.pendingOrders) {
+        this.pendingOrders.set(po.ticket, {
+          ...po,
+          timeSetupIso: po.timeSetupIso || new Date(po.timeSetup * 1000).toISOString(),
+        });
+      }
+    }
+
+    // 4. Update Market Depth
+    if (payload.marketDepth) {
+      this.marketDepth = payload.marketDepth;
+    }
+
+    // 5. Update Live Ticks & Persist to SQLite
     if (Array.isArray(payload.ticks)) {
+      dbInsertTicks(payload.ticks).catch((e) => console.error('DB insert ticks error:', e));
+      pruneDatabase().catch((e) => console.error('DB prune error:', e));
       for (const tick of payload.ticks) {
         const existing = this.ticks.get(tick.symbol);
         const updated: TickData = {
@@ -299,7 +350,18 @@ class TradeStore {
     return { success: true, commandId: id };
   }
 
+  // Prune any unexecuted orders older than 24 hours
+  public pruneStaleOrders() {
+    const twentyFourHoursAgo = Date.now() - 24 * 60 * 60 * 1000;
+    this.commandQueue = this.commandQueue.filter((cmd) => {
+      const isUnexecuted = cmd.status === 'pending' || cmd.status === 'dispatched';
+      const isExpired = isUnexecuted && cmd.createdAt < twentyFourHoursAgo;
+      return !isExpired;
+    });
+  }
+
   private dispatchPendingCommands(): TradeCommand[] {
+    this.pruneStaleOrders();
     const toDispatch: TradeCommand[] = [];
     for (const cmd of this.commandQueue) {
       if (cmd.status === 'pending') {
@@ -448,6 +510,7 @@ class TradeStore {
   }
 
   public getState() {
+    this.pruneStaleOrders();
     // Check if EA timed out (no sync in 5 seconds)
     const isEaActive = this.eaConnected && Date.now() - this.lastEaSync < 5000;
 
@@ -469,10 +532,13 @@ class TradeStore {
       currentChart: this.currentChart,
       allSymbols: this.allSymbols,
       chartHistory: this.chartHistory,
+      indicators: this.indicators,
       account: this.account,
       positions: Array.from(this.positions.values()),
+      pendingOrders: Array.from(this.pendingOrders.values()),
       ticks: Array.from(this.ticks.values()),
       tickHistory: Object.fromEntries(this.tickHistory.entries()),
+      marketDepth: this.marketDepth,
       commandQueue: this.commandQueue,
       riskGuard: this.riskGuard,
       logs: this.logs,
@@ -491,6 +557,18 @@ class TradeStore {
     return this.chartHistory;
   }
 
+  public getPendingOrders() {
+    return Array.from(this.pendingOrders.values());
+  }
+
+  public getMarketDepth() {
+    return this.marketDepth;
+  }
+
+  public getIndicators() {
+    return this.indicators;
+  }
+
   public getTicks() {
     return Array.from(this.ticks.values());
   }
@@ -505,6 +583,59 @@ class TradeStore {
 
   public getRiskGuard() {
     return this.riskGuard;
+  }
+
+  // Request on-demand history from EA via command queue
+  public requestHistoryFromEA(symbol: string, timeframe = 'M1', count = 100) {
+    return this.enqueueCommand({
+      action: 'FETCH_HISTORY',
+      symbol: symbol.toUpperCase(),
+      comment: JSON.stringify({ timeframe, count }),
+      source: 'AI_MCP',
+    });
+  }
+
+  // Seed synthetic candles for instant testing and AI model validation
+  public async seedCandles(symbol: string, timeframe = 'M1', count = 60, basePrice = 1.085) {
+    const sym = symbol.toUpperCase();
+    const tf = timeframe.toUpperCase();
+    const nowSec = Math.floor(Date.now() / 1000);
+    const intervalSec = tf === 'M5' ? 300 : tf === 'M15' ? 900 : tf === 'H1' ? 3600 : 60;
+    const generated: CandleData[] = [];
+    let cur = basePrice;
+
+    for (let i = count - 1; i >= 0; i--) {
+      const candleTime = nowSec - i * intervalSec;
+      const change = (Math.random() - 0.49) * (cur * 0.001);
+      const open = Number(cur.toFixed(5));
+      const close = Number((cur + change).toFixed(5));
+      const high = Number((Math.max(open, close) + Math.random() * (cur * 0.0005)).toFixed(5));
+      const low = Number((Math.min(open, close) - Math.random() * (cur * 0.0005)).toFixed(5));
+      const volume = Math.floor(50 + Math.random() * 200);
+
+      generated.push({
+        time: candleTime,
+        timeIso: new Date(candleTime * 1000).toISOString(),
+        open,
+        high,
+        low,
+        close,
+        volume,
+      });
+      cur = close;
+    }
+
+    this.chartHistory = generated;
+    await dbInsertCandles(sym, tf, generated);
+    this.indicators = calculateIndicators(this.chartHistory, sym, tf);
+    this.addLog('info', `Seeded ${count} test candles`, `${sym} [${tf}] starting @ ${basePrice}`, 'TEST_SIMULATOR');
+    return {
+      symbol: sym,
+      timeframe: tf,
+      count: generated.length,
+      candles: generated,
+      indicators: this.indicators,
+    };
   }
 }
 

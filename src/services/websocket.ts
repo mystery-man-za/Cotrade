@@ -26,6 +26,13 @@ export function useBridgeData() {
     let retryTimeout: any = null;
     let isUnmounted = false;
 
+    // Automatic polling heartbeat ensures instant pickup when EA begins streaming
+    const pollInterval = setInterval(() => {
+      if (!isUnmounted) {
+        fetchFullState();
+      }
+    }, 2000);
+
     function connectWs() {
       if (isUnmounted) return;
       setWsStatus('connecting');
@@ -180,6 +187,7 @@ export function useBridgeData() {
 
     return () => {
       isUnmounted = true;
+      clearInterval(pollInterval);
       if (retryTimeout) clearTimeout(retryTimeout);
       if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
       if (wsRef.current) wsRef.current.close();

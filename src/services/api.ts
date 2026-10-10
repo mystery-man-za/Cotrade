@@ -109,4 +109,10 @@ export const api = {
     if (!res.ok) throw new Error('Failed to fetch database orders');
     return res.json();
   },
+
+  async pruneDatabase(): Promise<{ success: boolean; purgedUnexecutedOrders: number; message: string }> {
+    const res = await fetch('/api/database/prune', { method: 'POST' });
+    if (!res.ok) throw new Error('Failed to prune database');
+    return res.json();
+  },
 };

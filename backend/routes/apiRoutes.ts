@@ -209,6 +209,95 @@ apiRouter.get('/database/orders', async (req, res) => {
   }
 });
 
+// Explicitly prune database & purge unexecuted orders older than 24 hours
+apiRouter.post('/database/prune', async (req, res) => {
+  try {
+    tradeStore.pruneStaleOrders();
+    const { dbPruneDatabase } = await import('../database/db.js');
+    const result = await dbPruneDatabase();
+    res.json({ success: true, ...result });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message });
+  }
+});
+
+// Query candles history from SQLite database
+apiRouter.get('/database/candles', async (req, res) => {
+  try {
+    const symbol = (req.query.symbol as string) || 'EURUSD';
+    const timeframe = (req.query.timeframe as string) || 'M1';
+    const limit = Number(req.query.limit) || 100;
+    const { dbGetCandles } = await import('../database/db.js');
+    const candles = await dbGetCandles(symbol, timeframe, limit);
+    res.json({ symbol, timeframe, count: candles.length, candles });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message });
+  }
+});
+
+// Query ticks history from SQLite database
+apiRouter.get('/database/ticks', async (req, res) => {
+  try {
+    const symbol = req.query.symbol as string;
+    const limit = Number(req.query.limit) || 100;
+    const { dbGetTicksHistory } = await import('../database/db.js');
+    const ticks = await dbGetTicksHistory(symbol, limit);
+    res.json({ count: ticks.length, ticks });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message });
+  }
+});
+
+// Query account history snapshots from SQLite database
+apiRouter.get('/database/account-history', async (req, res) => {
+  try {
+    const limit = Number(req.query.limit) || 100;
+    const { dbGetAccountHistory } = await import('../database/db.js');
+    const history = await dbGetAccountHistory(limit);
+    res.json({ count: history.length, history });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message });
+  }
+});
+
+// Simulate synthetic candles for strategy backtesting without waiting for live ticks
+apiRouter.post('/candles/simulate', async (req, res) => {
+  try {
+    const { symbol, timeframe, count, basePrice } = req.body;
+    const result = await tradeStore.seedCandles(
+      symbol || 'EURUSD',
+      timeframe || 'M1',
+      Number(count) || 60,
+      Number(basePrice) || 1.085
+    );
+    broadcast({
+      type: 'ea:sync',
+      payload: {
+        chartHistory: result.candles,
+      },
+    });
+    res.json({ success: true, ...result });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message });
+  }
+});
+
+// Request historical candles from EA on demand
+apiRouter.post('/candles/request', (req, res) => {
+  try {
+    const { symbol, timeframe, count } = req.body;
+    if (!symbol) return res.status(400).json({ error: 'Missing symbol' });
+    const result = tradeStore.requestHistoryFromEA(
+      symbol,
+      timeframe || 'M1',
+      Number(count) || 100
+    );
+    res.json({ success: true, result });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message });
+  }
+});
+
 // Download raw SQLite database file
 apiRouter.get('/database/download', (req, res) => {
   const dbPath = path.resolve(process.cwd(), 'data/mt5_bridge.sqlite');

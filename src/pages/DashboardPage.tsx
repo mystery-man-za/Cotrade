@@ -38,6 +38,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ state, onRefresh }
       <CurrentChartSymbolCard
         currentChart={currentChart}
         onSelectSymbol={setSelectedSymbol}
+        onRefresh={onRefresh}
       />
 
       {/* 4. Real-Time Tick Stream Bar */}

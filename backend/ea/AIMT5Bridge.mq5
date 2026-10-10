@@ -45,6 +45,47 @@ datetime       g_lastSyncTime = 0;
 bool           g_isSyncing = false;
 string         g_trackedSymbols[];
 int            g_trackedCount = 0;
+string         g_onDemandHistoryJson = "";
+
+//+------------------------------------------------------------------+
+//| Convert string timeframe to ENUM_TIMEFRAMES                      |
+//+------------------------------------------------------------------+
+ENUM_TIMEFRAMES StringToTimeframe(string tf)
+{
+   if(tf == "M1") return PERIOD_M1;
+   if(tf == "M2") return PERIOD_M2;
+   if(tf == "M3") return PERIOD_M3;
+   if(tf == "M4") return PERIOD_M4;
+   if(tf == "M5") return PERIOD_M5;
+   if(tf == "M6") return PERIOD_M6;
+   if(tf == "M10") return PERIOD_M10;
+   if(tf == "M12") return PERIOD_M12;
+   if(tf == "M15") return PERIOD_M15;
+   if(tf == "M20") return PERIOD_M20;
+   if(tf == "M30") return PERIOD_M30;
+   if(tf == "H1") return PERIOD_H1;
+   if(tf == "H2") return PERIOD_H2;
+   if(tf == "H3") return PERIOD_H3;
+   if(tf == "H4") return PERIOD_H4;
+   if(tf == "H6") return PERIOD_H6;
+   if(tf == "H8") return PERIOD_H8;
+   if(tf == "H12") return PERIOD_H12;
+   if(tf == "D1") return PERIOD_D1;
+   if(tf == "W1") return PERIOD_W1;
+   if(tf == "MN1") return PERIOD_MN1;
+   return Period();
+}
+
+//+------------------------------------------------------------------+
+//| Convert datetime to standardized ISO-8601 string                 |
+//+------------------------------------------------------------------+
+string TimeToISO(datetime t)
+{
+   if(t <= 0) t = TimeCurrent();
+   MqlDateTime dt;
+   TimeToStruct(t, dt);
+   return StringFormat("%04d-%02d-%02dT%02d:%02d:%02dZ", dt.year, dt.mon, dt.day, dt.hour, dt.min, dt.sec);
+}
 
 //--- Execution Result Queue
 struct TradeResultItem
@@ -97,6 +138,9 @@ int OnInit()
       Print("SUCCESS: Connected to AI MT5 Bridge at ", InpBridgeUrl, " (HTTP ", res, ")");
    }
 
+   // Subscribe to Depth of Market / Order Book if supported
+   MarketBookAdd(_Symbol);
+
    // Initialize millisecond timer for ultra-fast asynchronous execution
    EventSetMillisecondTimer(InpTimerIntervalMs);
 
@@ -111,6 +155,7 @@ int OnInit()
 void OnDeinit(const int reason)
 {
    EventKillTimer();
+   MarketBookRelease(_Symbol);
    Print("AI MT5 Bridge EA Deinitialized. Reason: ", reason);
 }
 
@@ -174,6 +219,24 @@ void ParseSymbols()
       ArrayResize(g_trackedSymbols, g_trackedCount + 1);
       g_trackedSymbols[g_trackedCount] = _Symbol;
       g_trackedCount++;
+   }
+
+   // Auto-discover Market Watch symbols from terminal (up to 30 symbols)
+   int totalMW = SymbolsTotal(true);
+   for(int m = 0; m < totalMW && g_trackedCount < 30; m++)
+   {
+      string mwSym = SymbolName(m, true);
+      bool alreadyAdded = false;
+      for(int k = 0; k < g_trackedCount; k++)
+      {
+         if(g_trackedSymbols[k] == mwSym) { alreadyAdded = true; break; }
+      }
+      if(!alreadyAdded && mwSym != "")
+      {
+         ArrayResize(g_trackedSymbols, g_trackedCount + 1);
+         g_trackedSymbols[g_trackedCount] = mwSym;
+         g_trackedCount++;
+      }
    }
 }
 
@@ -240,6 +303,17 @@ string BuildSyncJson()
    json += "\"terminalBuild\":" + IntegerToString(TerminalInfoInteger(TERMINAL_BUILD)) + ",";
 
    // Current Active Chart Info
+   MqlRates currentD1[];
+   double cSessionOpen = 0.0, cSessionHigh = 0.0, cSessionLow = 0.0;
+   long cSessionVolume = 0;
+   if(CopyRates(_Symbol, PERIOD_D1, 0, 1, currentD1) > 0)
+   {
+      cSessionOpen = currentD1[0].open;
+      cSessionHigh = currentD1[0].high;
+      cSessionLow = currentD1[0].low;
+      cSessionVolume = (long)currentD1[0].tick_volume;
+   }
+
    json += "\"currentChart\":{";
    json += "\"symbol\":\"" + _Symbol + "\",";
    json += "\"timeframe\":\"" + EnumToString((ENUM_TIMEFRAMES)Period()) + "\",";
@@ -254,6 +328,10 @@ string BuildSyncJson()
    json += "\"contractSize\":" + DoubleToString(SymbolInfoDouble(_Symbol, SYMBOL_TRADE_CONTRACT_SIZE), 2) + ",";
    json += "\"tickValue\":" + DoubleToString(SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE), 4) + ",";
    json += "\"tradeAllowed\":" + ((SymbolInfoInteger(_Symbol, SYMBOL_TRADE_MODE) != SYMBOL_TRADE_MODE_DISABLED) ? "true" : "false") + ",";
+   json += "\"sessionOpen\":" + DoubleToString(cSessionOpen, _Digits) + ",";
+   json += "\"sessionHigh\":" + DoubleToString(cSessionHigh, _Digits) + ",";
+   json += "\"sessionLow\":" + DoubleToString(cSessionLow, _Digits) + ",";
+   json += "\"sessionVolume\":" + IntegerToString(cSessionVolume) + ",";
    json += "\"description\":\"" + EscapeJson(SymbolInfoString(_Symbol, SYMBOL_DESCRIPTION)) + "\",";
    json += "\"currencyBase\":\"" + SymbolInfoString(_Symbol, SYMBOL_CURRENCY_BASE) + "\",";
    json += "\"currencyProfit\":\"" + SymbolInfoString(_Symbol, SYMBOL_CURRENCY_PROFIT) + "\"";
@@ -268,6 +346,14 @@ string BuildSyncJson()
       {
          if(s > 0) json += ",";
          int sDigits = (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
+         MqlRates symD1[];
+         double sOpen = 0.0, sHigh = 0.0, sLow = 0.0;
+         if(CopyRates(sym, PERIOD_D1, 0, 1, symD1) > 0)
+         {
+            sOpen = symD1[0].open;
+            sHigh = symD1[0].high;
+            sLow  = symD1[0].low;
+         }
          json += "{";
          json += "\"symbol\":\"" + sym + "\",";
          json += "\"bid\":" + DoubleToString(SymbolInfoDouble(sym, SYMBOL_BID), sDigits) + ",";
@@ -280,11 +366,34 @@ string BuildSyncJson()
          json += "\"lotStep\":" + DoubleToString(SymbolInfoDouble(sym, SYMBOL_VOLUME_STEP), 2) + ",";
          json += "\"contractSize\":" + DoubleToString(SymbolInfoDouble(sym, SYMBOL_TRADE_CONTRACT_SIZE), 2) + ",";
          json += "\"tradeAllowed\":" + ((SymbolInfoInteger(sym, SYMBOL_TRADE_MODE) != SYMBOL_TRADE_MODE_DISABLED) ? "true" : "false") + ",";
+         json += "\"sessionOpen\":" + DoubleToString(sOpen, sDigits) + ",";
+         json += "\"sessionHigh\":" + DoubleToString(sHigh, sDigits) + ",";
+         json += "\"sessionLow\":" + DoubleToString(sLow, sDigits) + ",";
          json += "\"isCurrentChart\":" + (sym == _Symbol ? "true" : "false");
          json += "}";
       }
    }
    json += "],";
+
+   // Market Depth / DOM for active symbol
+   json += "\"marketDepth\":{";
+   json += "\"symbol\":\"" + _Symbol + "\",";
+   json += "\"items\":[";
+   MqlBookInfo book[];
+   if(MarketBookGet(_Symbol, book))
+   {
+      int bookSize = ArraySize(book);
+      for(int b = 0; b < bookSize && b < 10; b++)
+      {
+         if(b > 0) json += ",";
+         json += "{";
+         json += "\"type\":\"" + (book[b].type == BOOK_TYPE_BUY ? "BUY" : "SELL") + "\",";
+         json += "\"price\":" + DoubleToString(book[b].price, _Digits) + ",";
+         json += "\"volume\":" + DoubleToString(book[b].volume_real > 0 ? book[b].volume_real : (double)book[b].volume, 2);
+         json += "}";
+      }
+   }
+   json += "]},";
 
    // Chart History (transmits past candles on startup and every 5 seconds)
    static datetime s_lastHistorySend = 0;
@@ -292,6 +401,13 @@ string BuildSyncJson()
    {
       s_lastHistorySend = TimeCurrent();
       json += "\"chartHistory\":" + BuildChartHistoryJson(InpHistoryCandles) + ",";
+   }
+
+   // On-demand history payload if requested by Bridge
+   if(g_onDemandHistoryJson != "")
+   {
+      json += "\"historyPayload\":" + g_onDemandHistoryJson + ",";
+      g_onDemandHistoryJson = "";
    }
 
    // Account Info
@@ -334,9 +450,52 @@ string BuildSyncJson()
          json += "\"swap\":" + DoubleToString(m_position.Swap(), 2) + ",";
          json += "\"magic\":" + IntegerToString(m_position.Magic()) + ",";
          json += "\"comment\":\"" + EscapeJson(m_position.Comment()) + "\",";
-         json += "\"openTime\":" + IntegerToString((long)m_position.Time());
+         json += "\"openTime\":" + IntegerToString((long)m_position.Time()) + ",";
+         json += "\"openTimeIso\":\"" + TimeToISO((datetime)m_position.Time()) + "\"";
          json += "}";
          addedPositions++;
+      }
+   }
+   json += "],";
+
+   // Pending Orders (Limit / Stop Orders)
+   json += "\"pendingOrders\":[";
+   int totalOrders = OrdersTotal();
+   int addedOrders = 0;
+   for(int o = 0; o < totalOrders; o++)
+   {
+      ulong ordTicket = OrderGetTicket(o);
+      if(ordTicket > 0)
+      {
+         ENUM_ORDER_TYPE otype = (ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
+         string typeStr = "";
+         if(otype == ORDER_TYPE_BUY_LIMIT) typeStr = "BUY_LIMIT";
+         else if(otype == ORDER_TYPE_SELL_LIMIT) typeStr = "SELL_LIMIT";
+         else if(otype == ORDER_TYPE_BUY_STOP) typeStr = "BUY_STOP";
+         else if(otype == ORDER_TYPE_SELL_STOP) typeStr = "SELL_STOP";
+         else if(otype == ORDER_TYPE_BUY_STOP_LIMIT) typeStr = "BUY_STOP_LIMIT";
+         else if(otype == ORDER_TYPE_SELL_STOP_LIMIT) typeStr = "SELL_STOP_LIMIT";
+
+         if(typeStr != "")
+         {
+            if(addedOrders > 0) json += ",";
+            datetime setupTime = (datetime)OrderGetInteger(ORDER_TIME_SETUP);
+            json += "{";
+            json += "\"ticket\":" + IntegerToString(ordTicket) + ",";
+            json += "\"symbol\":\"" + OrderGetString(ORDER_SYMBOL) + "\",";
+            json += "\"type\":\"" + typeStr + "\",";
+            json += "\"volume\":" + DoubleToString(OrderGetDouble(ORDER_VOLUME_CURRENT), 2) + ",";
+            json += "\"priceOpen\":" + DoubleToString(OrderGetDouble(ORDER_PRICE_OPEN), 5) + ",";
+            json += "\"currentPrice\":" + DoubleToString(OrderGetDouble(ORDER_PRICE_CURRENT), 5) + ",";
+            json += "\"sl\":" + DoubleToString(OrderGetDouble(ORDER_SL), 5) + ",";
+            json += "\"tp\":" + DoubleToString(OrderGetDouble(ORDER_TP), 5) + ",";
+            json += "\"magic\":" + IntegerToString(OrderGetInteger(ORDER_MAGIC)) + ",";
+            json += "\"comment\":\"" + EscapeJson(OrderGetString(ORDER_COMMENT)) + "\",";
+            json += "\"timeSetup\":" + IntegerToString((long)setupTime) + ",";
+            json += "\"timeSetupIso\":\"" + TimeToISO(setupTime) + "\"";
+            json += "}";
+            addedOrders++;
+         }
       }
    }
    json += "],";
@@ -361,7 +520,8 @@ string BuildSyncJson()
             json += "\"last\":" + DoubleToString(tick.last, 5) + ",";
             json += "\"spread\":" + IntegerToString(spread) + ",";
             json += "\"volume\":" + IntegerToString((long)tick.volume) + ",";
-            json += "\"time\":" + IntegerToString((long)tick.time);
+            json += "\"time\":" + IntegerToString((long)tick.time) + ",";
+            json += "\"timeIso\":\"" + TimeToISO(tick.time) + "\"";
             json += "}";
             addedTicks++;
          }
@@ -447,6 +607,7 @@ void ExecuteSingleCommand(string cmd)
    string symbol = ExtractJsonField(cmd, "symbol");
    string orderType = ExtractJsonField(cmd, "orderType");
    double volume = StringToDouble(ExtractJsonField(cmd, "volume"));
+   double price = StringToDouble(ExtractJsonField(cmd, "price"));
    double sl = StringToDouble(ExtractJsonField(cmd, "sl"));
    double tp = StringToDouble(ExtractJsonField(cmd, "tp"));
    ulong ticket = (ulong)StringToInteger(ExtractJsonField(cmd, "ticket"));
@@ -507,6 +668,26 @@ void ExecuteSingleCommand(string cmd)
          {
             execPrice = tick.bid;
             success = m_trade.Sell(volume, symbol, execPrice, sl, tp, comment);
+         }
+         else if(orderType == "BUY_LIMIT")
+         {
+            execPrice = (price > 0) ? NormalizeDouble(price, digits) : tick.ask;
+            success = m_trade.BuyLimit(volume, execPrice, symbol, sl, tp, ORDER_TIME_GTC, 0, comment);
+         }
+         else if(orderType == "SELL_LIMIT")
+         {
+            execPrice = (price > 0) ? NormalizeDouble(price, digits) : tick.bid;
+            success = m_trade.SellLimit(volume, execPrice, symbol, sl, tp, ORDER_TIME_GTC, 0, comment);
+         }
+         else if(orderType == "BUY_STOP")
+         {
+            execPrice = (price > 0) ? NormalizeDouble(price, digits) : tick.ask;
+            success = m_trade.BuyStop(volume, execPrice, symbol, sl, tp, ORDER_TIME_GTC, 0, comment);
+         }
+         else if(orderType == "SELL_STOP")
+         {
+            execPrice = (price > 0) ? NormalizeDouble(price, digits) : tick.bid;
+            success = m_trade.SellStop(volume, execPrice, symbol, sl, tp, ORDER_TIME_GTC, 0, comment);
          }
 
          if(success)
@@ -597,6 +778,75 @@ void ExecuteSingleCommand(string cmd)
       success = true;
       errMsg = "Closed " + IntegerToString(closedCount) + " positions";
    }
+   else if(action == "CANCEL_PENDING")
+   {
+      if(ticket > 0)
+      {
+         success = m_trade.OrderDelete(ticket);
+         if(success)
+         {
+            dealTicket = ticket;
+            Print("PENDING ORDER CANCELLED: #", ticket);
+         }
+         else
+         {
+            errCode = (int)m_trade.ResultRetcode();
+            errMsg = m_trade.ResultRetcodeDescription();
+         }
+      }
+      else
+      {
+         errCode = 4753;
+         errMsg = "Missing pending order ticket";
+      }
+   }
+   else if(action == "FETCH_HISTORY")
+   {
+      string tfStr = "M1";
+      int count = 100;
+      if(comment != "")
+      {
+         string tfExt = ExtractJsonField(comment, "timeframe");
+         if(tfExt != "") tfStr = tfExt;
+         string cntExt = ExtractJsonField(comment, "count");
+         if(cntExt != "") count = (int)StringToInteger(cntExt);
+      }
+      if(count <= 0) count = 100;
+      ENUM_TIMEFRAMES tfEnum = StringToTimeframe(tfStr);
+
+      MqlRates reqRates[];
+      ArraySetAsSeries(reqRates, false);
+      int copied = CopyRates(symbol, tfEnum, 0, count, reqRates);
+      if(copied > 0)
+      {
+         int sDigits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
+         string hJson = "{\"symbol\":\"" + symbol + "\",\"timeframe\":\"" + tfStr + "\",\"candles\":[";
+         for(int k = 0; k < copied; k++)
+         {
+            if(k > 0) hJson += ",";
+            hJson += "{";
+            hJson += "\"time\":" + IntegerToString((long)reqRates[k].time) + ",";
+            hJson += "\"timeIso\":\"" + TimeToISO(reqRates[k].time) + "\",";
+            hJson += "\"open\":" + DoubleToString(reqRates[k].open, sDigits) + ",";
+            hJson += "\"high\":" + DoubleToString(reqRates[k].high, sDigits) + ",";
+            hJson += "\"low\":" + DoubleToString(reqRates[k].low, sDigits) + ",";
+            hJson += "\"close\":" + DoubleToString(reqRates[k].close, sDigits) + ",";
+            hJson += "\"volume\":" + IntegerToString((long)reqRates[k].tick_volume) + ",";
+            hJson += "\"spread\":" + IntegerToString((int)reqRates[k].spread) + ",";
+            hJson += "\"realVolume\":" + IntegerToString((long)reqRates[k].real_volume);
+            hJson += "}";
+         }
+         hJson += "]}";
+         g_onDemandHistoryJson = hJson;
+         success = true;
+         Print("ON-DEMAND HISTORY PULLED: ", symbol, " [", tfStr, "] ", copied, " candles");
+      }
+      else
+      {
+         errCode = GetLastError();
+         errMsg = "Failed to copy rates for " + symbol + " [code: " + IntegerToString(errCode) + "]";
+      }
+   }
 
    // Record result in queue to inform Bridge
    if(g_resultCount < 20)
@@ -618,6 +868,7 @@ void ExecuteSingleCommand(string cmd)
 //+------------------------------------------------------------------+
 string BuildChartHistoryJson(int count)
 {
+   if(count <= 0) count = InpHistoryCandles;
    if(count <= 0) count = 60;
    MqlRates rates[];
    ArraySetAsSeries(rates, false); // Oldest to newest chronological
@@ -630,11 +881,14 @@ string BuildChartHistoryJson(int count)
       if(i > 0) json += ",";
       json += "{";
       json += "\"time\":" + IntegerToString((long)rates[i].time) + ",";
+      json += "\"timeIso\":\"" + TimeToISO(rates[i].time) + "\",";
       json += "\"open\":" + DoubleToString(rates[i].open, _Digits) + ",";
       json += "\"high\":" + DoubleToString(rates[i].high, _Digits) + ",";
       json += "\"low\":" + DoubleToString(rates[i].low, _Digits) + ",";
       json += "\"close\":" + DoubleToString(rates[i].close, _Digits) + ",";
-      json += "\"volume\":" + IntegerToString((long)rates[i].tick_volume);
+      json += "\"volume\":" + IntegerToString((long)rates[i].tick_volume) + ",";
+      json += "\"spread\":" + IntegerToString((int)rates[i].spread) + ",";
+      json += "\"realVolume\":" + IntegerToString((long)rates[i].real_volume);
       json += "}";
    }
    json += "]";

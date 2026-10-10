@@ -1,16 +1,75 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { ChartSymbolInfo } from '../../types';
-import { Monitor, Zap, Shield, ArrowUpRight, ArrowDownRight, Layers, DollarSign } from 'lucide-react';
+import {
+  Monitor,
+  Zap,
+  Shield,
+  ArrowUpRight,
+  ArrowDownRight,
+  Layers,
+  DollarSign,
+  Download,
+  Sparkles,
+  CheckCircle2,
+  RefreshCw,
+} from 'lucide-react';
 
 interface CurrentChartSymbolCardProps {
   currentChart: ChartSymbolInfo | null;
   onSelectSymbol?: (symbol: string) => void;
+  onRefresh?: () => void;
 }
 
 export const CurrentChartSymbolCard: React.FC<CurrentChartSymbolCardProps> = ({
   currentChart,
   onSelectSymbol,
+  onRefresh,
 }) => {
+  const [loadingAction, setLoadingAction] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<string | null>(null);
+
+  const handleRequestCandles = async (symbol: string, timeframe: string) => {
+    try {
+      setLoadingAction('request');
+      const res = await fetch('/api/candles/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbol, timeframe, count: 100 }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setFeedback(`Requested 100 ${timeframe} candles from EA for ${symbol}`);
+        onRefresh?.();
+      }
+    } catch {
+      setFeedback('Failed to request candles from EA');
+    } finally {
+      setLoadingAction(null);
+      setTimeout(() => setFeedback(null), 3500);
+    }
+  };
+
+  const handleSimulateCandles = async (symbol: string) => {
+    try {
+      setLoadingAction('simulate');
+      const res = await fetch('/api/candles/simulate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbol, timeframe: 'M1', count: 80, basePrice: currentChart?.bid || 1.085 }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setFeedback(`Generated ${data.count} test candles & indicators for ${symbol}`);
+        onRefresh?.();
+      }
+    } catch {
+      setFeedback('Simulation failed');
+    } finally {
+      setLoadingAction(null);
+      setTimeout(() => setFeedback(null), 3500);
+    }
+  };
+
   if (!currentChart) {
     return (
       <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-5 shadow-sm">
@@ -26,14 +85,25 @@ export const CurrentChartSymbolCard: React.FC<CurrentChartSymbolCardProps> = ({
           </span>
         </div>
 
-        <div className="border border-dashed border-slate-800 rounded-lg p-6 text-center text-slate-400 font-mono text-xs space-y-1.5">
+        <div className="border border-dashed border-slate-800 rounded-lg p-6 text-center text-slate-400 font-mono text-xs space-y-3">
           <p className="text-sm font-semibold text-slate-300">
             No Active MT5 Chart Connected Yet
           </p>
-          <p className="text-slate-500 max-w-md mx-auto text-[11px]">
-            Once you drag <code className="text-cyan-400">AIMT5Bridge.mq5</code> onto an MT5 chart (e.g. EURUSD M1),
-            this card will immediately reflect the active chart symbol, broker specifications, and tick value.
+          <p className="text-slate-500 max-w-md mx-auto text-[11px] leading-relaxed">
+            Attach <code className="text-cyan-400 font-bold">AIMT5Bridge.mq5</code> to any chart in MetaTrader 5 (e.g. EURUSD M1).
+            This section will immediately display the active symbol specifications, live quotes, and session boundaries.
           </p>
+
+          <div className="pt-2 flex items-center justify-center gap-3">
+            <button
+              onClick={() => handleSimulateCandles('EURUSD')}
+              disabled={loadingAction === 'simulate'}
+              className="px-3.5 py-1.5 rounded-lg bg-cyan-600/30 hover:bg-cyan-600/50 text-cyan-300 border border-cyan-500/40 text-xs font-mono font-bold flex items-center gap-2 transition-all shadow-sm"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              <span>{loadingAction === 'simulate' ? 'Seeding...' : 'Test With Synthetic Candles'}</span>
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -43,7 +113,7 @@ export const CurrentChartSymbolCard: React.FC<CurrentChartSymbolCardProps> = ({
 
   return (
     <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-cyan-950/30 border border-cyan-800/40 rounded-xl p-5 shadow-lg shadow-cyan-950/20">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-800 mb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800 mb-4">
         <div className="flex items-center gap-2.5">
           <div className="h-9 w-9 rounded-lg bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 flex items-center justify-center">
             <Monitor className="h-5 w-5" />
@@ -67,14 +137,33 @@ export const CurrentChartSymbolCard: React.FC<CurrentChartSymbolCardProps> = ({
           </div>
         </div>
 
-        <button
-          onClick={() => onSelectSymbol?.(currentChart.symbol)}
-          className="self-start sm:self-auto px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-mono text-xs font-bold transition-all shadow-sm flex items-center gap-1.5"
-        >
-          <Zap className="h-3.5 w-3.5" />
-          Trade {currentChart.symbol}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => handleRequestCandles(currentChart.symbol, currentChart.timeframe)}
+            disabled={loadingAction === 'request'}
+            title="Request historical candles directly from MT5"
+            className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-mono text-xs border border-slate-700 transition-colors flex items-center gap-1.5"
+          >
+            <Download className="h-3.5 w-3.5 text-cyan-400" />
+            <span>{loadingAction === 'request' ? 'Requesting...' : 'Pull Past Candles'}</span>
+          </button>
+
+          <button
+            onClick={() => onSelectSymbol?.(currentChart.symbol)}
+            className="px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-mono text-xs font-bold transition-all shadow-sm flex items-center gap-1.5"
+          >
+            <Zap className="h-3.5 w-3.5" />
+            Trade {currentChart.symbol}
+          </button>
+        </div>
       </div>
+
+      {feedback && (
+        <div className="mb-3 p-2 rounded-lg bg-cyan-950/50 border border-cyan-800/50 text-xs font-mono text-cyan-300 flex items-center gap-2">
+          <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+          <span>{feedback}</span>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3 font-mono text-xs">
         {/* Bid */}
@@ -125,6 +214,28 @@ export const CurrentChartSymbolCard: React.FC<CurrentChartSymbolCardProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Session Aggregates if available */}
+      {currentChart.sessionHigh && currentChart.sessionHigh > 0 ? (
+        <div className="mt-3 pt-3 border-t border-slate-800/60 grid grid-cols-2 sm:grid-cols-4 gap-3 font-mono text-xs">
+          <div className="bg-slate-950/40 p-2 rounded border border-slate-900">
+            <span className="text-[10px] text-slate-500 block uppercase">Session Open</span>
+            <div className="text-slate-300 font-semibold">{currentChart.sessionOpen?.toFixed(digits) || '—'}</div>
+          </div>
+          <div className="bg-slate-950/40 p-2 rounded border border-slate-900">
+            <span className="text-[10px] text-slate-500 block uppercase">Session High</span>
+            <div className="text-emerald-400 font-semibold">{currentChart.sessionHigh.toFixed(digits)}</div>
+          </div>
+          <div className="bg-slate-950/40 p-2 rounded border border-slate-900">
+            <span className="text-[10px] text-slate-500 block uppercase">Session Low</span>
+            <div className="text-rose-400 font-semibold">{currentChart.sessionLow?.toFixed(digits) || '—'}</div>
+          </div>
+          <div className="bg-slate-950/40 p-2 rounded border border-slate-900">
+            <span className="text-[10px] text-slate-500 block uppercase">Session Vol (ticks)</span>
+            <div className="text-cyan-300 font-semibold">{currentChart.sessionVolume?.toLocaleString() || '—'}</div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 };

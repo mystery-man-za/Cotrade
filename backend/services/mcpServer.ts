@@ -225,6 +225,152 @@ export const MCP_TOOLS: MCPToolDefinition[] = [
       properties: {},
     },
   },
+  {
+    name: 'mt5_get_chart_history',
+    description: 'Retrieve real historical OHLCV candlestick data (open, high, low, close, volume, timestamps) with optional precomputed technical indicators (RSI, EMA, MACD, Bollinger Bands, ATR) for any symbol and timeframe (M1, M5, M15, H1, H4, D1).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        symbol: {
+          type: 'string',
+          description: 'Symbol ticker (e.g. EURUSD, XAUUSD, BTCUSD). Defaults to active chart symbol.',
+        },
+        timeframe: {
+          type: 'string',
+          description: 'Timeframe: M1, M5, M15, M30, H1, H4, D1 (default: active chart period or M1)',
+        },
+        limit: {
+          type: 'number',
+          description: 'Maximum number of recent candles to return (default: 60, max: 500)',
+        },
+        includeIndicators: {
+          type: 'boolean',
+          description: 'Whether to include precomputed technical indicators (RSI, EMA, MACD, Bollinger, ATR) calculated on these candles (default: true)',
+        },
+      },
+    },
+  },
+  {
+    name: 'mt5_get_technical_indicators',
+    description: 'Precomputed technical indicator suite for quantitative analysis: RSI (14), EMAs (9, 21, 50, 200), MACD (12,26,9), Bollinger Bands (20,2), ATR (14), and automated algorithmic market summary (STRONG_BUY, BUY, NEUTRAL, SELL, STRONG_SELL).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        symbol: {
+          type: 'string',
+          description: 'Symbol ticker (default: active chart symbol)',
+        },
+        timeframe: {
+          type: 'string',
+          description: 'Timeframe (default: M1)',
+        },
+      },
+    },
+  },
+  {
+    name: 'mt5_get_pending_orders',
+    description: 'Retrieve all active pending orders in MetaTrader 5 (BUY_LIMIT, SELL_LIMIT, BUY_STOP, SELL_STOP, BUY_STOP_LIMIT, SELL_STOP_LIMIT) including open prices, SL/TP, and order tickets.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        symbol: {
+          type: 'string',
+          description: 'Optional filter by symbol (e.g. EURUSD)',
+        },
+      },
+    },
+  },
+  {
+    name: 'mt5_cancel_pending_order',
+    description: 'Cancel an active pending limit or stop order in MetaTrader 5 by ticket ID.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ticket: {
+          type: 'number',
+          description: 'Order ticket ID to cancel',
+        },
+      },
+      required: ['ticket'],
+    },
+  },
+  {
+    name: 'mt5_request_chart_history',
+    description: 'Trigger an on-demand historical candle pull from MetaTrader 5 for any symbol, timeframe (M1, M5, M15, H1, etc.), and count. The EA fetches CopyRates from MT5 and uploads to the database.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        symbol: {
+          type: 'string',
+          description: 'Symbol ticker (e.g. EURUSD, GBPUSD, XAUUSD)',
+        },
+        timeframe: {
+          type: 'string',
+          description: 'Timeframe: M1, M5, M15, H1, H4, D1 (default: M1)',
+        },
+        count: {
+          type: 'number',
+          description: 'Number of historical candles to fetch from MT5 (e.g. 100, 250, 500)',
+        },
+      },
+      required: ['symbol'],
+    },
+  },
+  {
+    name: 'mt5_get_account_history',
+    description: 'Retrieve persistent historical account snapshots (balance, equity, margin level %, floating profit) stored in SQLite across time.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        limit: {
+          type: 'number',
+          description: 'Maximum snapshots to return (default: 30)',
+        },
+      },
+    },
+  },
+  {
+    name: 'mt5_get_tick_history',
+    description: 'Retrieve persisted historical tick stream data from SQLite with sub-second bids, asks, and spreads.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        symbol: {
+          type: 'string',
+          description: 'Symbol filter (e.g. EURUSD), or ALL for all symbols',
+        },
+        limit: {
+          type: 'number',
+          description: 'Maximum ticks to return (default: 50)',
+        },
+      },
+    },
+  },
+  {
+    name: 'mt5_simulate_candles',
+    description: 'Seed synthetic historical OHLCV candlestick data into the database and precalculate indicators for immediate backtesting or strategy testing without waiting for live ticks.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        symbol: {
+          type: 'string',
+          description: 'Symbol to simulate (default: EURUSD)',
+        },
+        timeframe: {
+          type: 'string',
+          description: 'Timeframe: M1, M5, M15, H1 (default: M1)',
+        },
+        count: {
+          type: 'number',
+          description: 'Number of candles to generate (default: 60)',
+        },
+        basePrice: {
+          type: 'number',
+          description: 'Starting price (default: 1.0850)',
+        },
+      },
+    },
+  },
 ];
 
 export async function executeMcpTool(name: string, args: Record<string, any> = {}): Promise<any> {
@@ -410,6 +556,123 @@ export async function executeMcpTool(name: string, args: Record<string, any> = {
       const state = tradeStore.getState();
       const limit = args.limit ? Number(args.limit) : 10;
       return state.commandQueue.slice(0, limit);
+    }
+
+    case 'mt5_get_chart_history': {
+      const sym = (args.symbol || tradeStore.getCurrentChart()?.symbol || 'EURUSD').toUpperCase();
+      const tf = (args.timeframe || tradeStore.getCurrentChart()?.timeframe || 'M1').toUpperCase();
+      const limit = args.limit ? Math.min(Number(args.limit), 500) : 60;
+      const includeIndicators = args.includeIndicators !== false;
+
+      // First check SQLite database for historical candles
+      const { dbGetCandles } = await import('../database/db.js');
+      let candles = await dbGetCandles(sym, tf, limit);
+
+      // Fallback to in-memory chartHistory if querying active chart and SQLite has fewer
+      if (candles.length === 0 && (!args.symbol || sym === tradeStore.getCurrentChart()?.symbol)) {
+        candles = tradeStore.getChartHistory().slice(-limit);
+      }
+
+      const { calculateIndicators } = await import('./indicatorEngine.js');
+      const indicators = includeIndicators ? calculateIndicators(candles, sym, tf) : null;
+
+      return {
+        symbol: sym,
+        timeframe: tf,
+        count: candles.length,
+        candles,
+        indicators,
+      };
+    }
+
+    case 'mt5_get_technical_indicators': {
+      const sym = (args.symbol || tradeStore.getCurrentChart()?.symbol || 'EURUSD').toUpperCase();
+      const tf = (args.timeframe || tradeStore.getCurrentChart()?.timeframe || 'M1').toUpperCase();
+
+      const { dbGetCandles } = await import('../database/db.js');
+      let candles = await dbGetCandles(sym, tf, 200);
+      if (candles.length === 0) {
+        candles = tradeStore.getChartHistory();
+      }
+
+      const { calculateIndicators } = await import('./indicatorEngine.js');
+      const indicators = calculateIndicators(candles, sym, tf);
+      if (!indicators) {
+        return {
+          status: 'insufficient_data',
+          message: `Insufficient candle history for ${sym} [${tf}]. Need at least 5 candles to compute indicators.`,
+          symbol: sym,
+          timeframe: tf,
+        };
+      }
+      return indicators;
+    }
+
+    case 'mt5_get_pending_orders': {
+      let orders = tradeStore.getPendingOrders();
+      if (args.symbol) {
+        orders = orders.filter((o) => o.symbol.toUpperCase() === args.symbol.toUpperCase());
+      }
+      return {
+        count: orders.length,
+        pendingOrders: orders,
+      };
+    }
+
+    case 'mt5_cancel_pending_order': {
+      const ticket = Number(args.ticket);
+      if (!ticket) throw new Error('Missing ticket parameter');
+      const res = tradeStore.enqueueCommand({
+        action: 'CANCEL_PENDING',
+        ticket,
+        source: 'AI_MCP',
+        comment: 'AI_MCP_CANCEL_PENDING',
+      });
+      return {
+        status: res.success ? 'queued' : 'rejected',
+        commandId: res.commandId,
+        message: `Cancellation queued for pending order #${ticket}`,
+      };
+    }
+
+    case 'mt5_request_chart_history': {
+      const sym = String(args.symbol).toUpperCase();
+      const tf = args.timeframe ? String(args.timeframe).toUpperCase() : 'M1';
+      const count = args.count ? Number(args.count) : 100;
+      const res = tradeStore.requestHistoryFromEA(sym, tf, count);
+      return {
+        status: 'dispatched_to_ea',
+        commandId: res.commandId,
+        message: `Requested ${count} candles for ${sym} [${tf}] from MT5 EA. Data will populate on next sync.`,
+      };
+    }
+
+    case 'mt5_get_account_history': {
+      const limit = args.limit ? Number(args.limit) : 30;
+      const { dbGetAccountHistory } = await import('../database/db.js');
+      const history = await dbGetAccountHistory(limit);
+      return {
+        count: history.length,
+        history,
+      };
+    }
+
+    case 'mt5_get_tick_history': {
+      const limit = args.limit ? Number(args.limit) : 50;
+      const { dbGetTicksHistory } = await import('../database/db.js');
+      const ticks = await dbGetTicksHistory(args.symbol, limit);
+      return {
+        count: ticks.length,
+        ticks,
+      };
+    }
+
+    case 'mt5_simulate_candles': {
+      const sym = args.symbol || 'EURUSD';
+      const tf = args.timeframe || 'M1';
+      const count = args.count ? Number(args.count) : 60;
+      const basePrice = args.basePrice ? Number(args.basePrice) : 1.085;
+      return await tradeStore.seedCandles(sym, tf, count, basePrice);
     }
 
     default:

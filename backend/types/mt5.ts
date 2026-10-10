@@ -1,6 +1,7 @@
 export type OrderType = 'BUY' | 'SELL';
+export type PendingOrderType = 'BUY_LIMIT' | 'SELL_LIMIT' | 'BUY_STOP' | 'SELL_STOP' | 'BUY_STOP_LIMIT' | 'SELL_STOP_LIMIT';
 export type CommandStatus = 'pending' | 'dispatched' | 'executed' | 'failed' | 'cancelled';
-export type OrderAction = 'EXECUTE_TRADE' | 'MODIFY_POSITION' | 'CLOSE_POSITION' | 'CLOSE_ALL' | 'SET_RISK_GUARD';
+export type OrderAction = 'EXECUTE_TRADE' | 'MODIFY_POSITION' | 'CLOSE_POSITION' | 'CLOSE_ALL' | 'CANCEL_PENDING' | 'FETCH_HISTORY' | 'SET_RISK_GUARD';
 
 export interface AccountInfo {
   login: number;
@@ -117,6 +118,10 @@ export interface ChartSymbolInfo {
   contractSize: number;
   tickValue: number;
   tradeAllowed: boolean;
+  sessionOpen?: number;
+  sessionHigh?: number;
+  sessionLow?: number;
+  sessionVolume?: number;
   description?: string;
   currencyBase?: string;
   currencyProfit?: string;
@@ -136,6 +141,10 @@ export interface DetailedSymbolInfo {
   tradeAllowed: boolean;
   high24h?: number;
   low24h?: number;
+  sessionOpen?: number;
+  sessionHigh?: number;
+  sessionLow?: number;
+  sessionVolume?: number;
   volume?: number;
   time?: number;
   isCurrentChart?: boolean;
@@ -143,23 +152,88 @@ export interface DetailedSymbolInfo {
 
 export interface CandleData {
   time: number;
+  timeIso?: string;
   open: number;
   high: number;
   low: number;
   close: number;
   volume: number;
+  tickCount?: number;
+  spread?: number;
+}
+
+export interface PendingOrder {
+  ticket: number;
+  symbol: string;
+  type: PendingOrderType;
+  volume: number;
+  priceOpen: number;
+  currentPrice?: number;
+  sl: number;
+  tp: number;
+  magic: number;
+  comment: string;
+  timeSetup: number;
+  timeSetupIso?: string;
+}
+
+export interface MarketDepthItem {
+  type: 'BUY' | 'SELL';
+  price: number;
+  volume: number;
+}
+
+export interface TechnicalIndicatorsResult {
+  symbol: string;
+  timeframe: string;
+  timestamp: number;
+  timestampIso: string;
+  price: number;
+  rsi14: number | null;
+  ema9: number | null;
+  ema21: number | null;
+  ema50: number | null;
+  ema200: number | null;
+  sma20: number | null;
+  sma50: number | null;
+  macd: {
+    macd: number;
+    signal: number;
+    histogram: number;
+  } | null;
+  bollinger: {
+    upper: number;
+    middle: number;
+    lower: number;
+    bandwidth: number;
+    percentB: number;
+  } | null;
+  atr14: number | null;
+  summary: 'STRONG_BUY' | 'BUY' | 'NEUTRAL' | 'SELL' | 'STRONG_SELL';
+  signals: {
+    rsiSignal: 'OVERBOUGHT' | 'OVERSOLD' | 'NEUTRAL';
+    macdSignal: 'BULLISH_CROSS' | 'BEARISH_CROSS' | 'NEUTRAL';
+    emaSignal: 'ABOVE_200' | 'BELOW_200' | 'NEUTRAL';
+  };
 }
 
 export interface EASyncPayload {
   apiKey: string;
   account: AccountInfo;
   positions: Position[];
+  pendingOrders?: PendingOrder[];
   ticks: TickData[];
   eaVersion: string;
   mt5Time: number;
   currentChart?: ChartSymbolInfo;
   allSymbols?: DetailedSymbolInfo[];
   chartHistory?: CandleData[];
+  marketDepth?: Record<string, { bids: MarketDepthItem[]; asks: MarketDepthItem[] }>;
+  historyPayload?: {
+    symbol: string;
+    timeframe: string;
+    candles: CandleData[];
+  };
   terminalName?: string;
   terminalCompany?: string;
   terminalBuild?: number;

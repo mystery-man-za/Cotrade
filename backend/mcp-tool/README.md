@@ -1,73 +1,85 @@
-# Mcp tool 
+# MCP Tool — Direct AI & Terminal Interface
 
-This is a tool that any outside of the site ai can use, it makes it easy for any ai to use the mcp tools in the site.
+This folder provides universal utilities allowing **any outside AI agent** (Claude Desktop, Cursor IDE, Windsurf, Cline, Gemini CLI, custom Python/Bash agents) to directly interact with MetaTrader 5 via the Model Context Protocol (MCP) or command-line shortcuts.
 
-# MCP Test Artifacts
+---
 
-Test scripts used to validate the MT5 AI Bridge MCP server. Run them against a
-live server (`npm run dev`, ports 3000 + 7777) from the project root.
+## 🚀 1. Direct Stdio MCP Server (`stdio.js`)
+Any MCP-compatible desktop host or agent can run this tool natively over standard input/output.
 
-Written in **Node.js** using only built-in modules (`net`, `fs`, `path`) — no
-dependencies, and no Python required. Node 24 is already installed (the project
-is TypeScript/Node).
-
-## Transports exercised
-
-| Transport | Endpoint | Script |
-|---|---|---|
-| JSON-RPC 2.0 direct POST | `POST /api/mcp` | curl example below |
-| REST tool shortcut | `POST /api/mcp/tools/:name` | curl example below |
-| SSE (Server-Sent Events) | `GET /api/mcp/sse` + `POST /api/mcp/messages` | `sse.js`, `sse-roundtrip.js` |
-| Health / handshake | `GET /api/mt5/health` (ports 3000 & 7777) | curl |
-
-## Scripts
-
-- `sse.js` — minimal raw-socket test: connect to the MCP SSE endpoint and read
-  the `endpoint` event that tells the client where to POST JSON-RPC messages.
-- `sse-roundtrip.js` — full SSE round-trip: open the stream, capture the
-  `sessionId` from the `endpoint` event, POST a `tools/call` to
-  `/api/mcp/messages?sessionId=<id>`, then read the JSON-RPC response as a
-  pushed `event: message` on the SSE stream.
-
-Both accept an optional output directory as the first argument
-(`node backend/mcp-test/sse.js [out-dir]`), defaulting to `backend/mcp-test/out`.
-
-## Direct JSON-RPC examples
-
-```bash
-# initialize handshake
-curl -X POST http://localhost:3000/api/mcp \
-  -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}'
-
-# list tools
-curl -X POST http://localhost:3000/api/mcp \
-  -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
-
-# call a tool
-curl -X POST http://localhost:3000/api/mcp \
-  -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"mt5_get_account_info","arguments":{}}}'
+### Claude Desktop Configuration (`claude_desktop_config.json`)
+```json
+{
+  "mcpServers": {
+    "mt5-bridge": {
+      "command": "node",
+      "args": ["backend/mcp-tool/stdio.js"]
+    }
+  }
+}
 ```
 
-## What was verified live
+### Cursor IDE Configuration (Settings → Features → MCP)
+- **Type**: `command`
+- **Command**: `node backend/mcp-tool/stdio.js`
 
-- `initialize` / `tools/list` handshake returns 13 tools with full JSON schemas.
-- Real EA data flowing (Deriv-Demo account, live ticks, open positions).
-- Full trade round-trip: `mt5_execute_trade` → queued → dispatched to EA →
-  executed on MT5 → position confirmed via `mt5_get_open_positions`.
-- SSE push-back of JSON-RPC responses on the stream.
-- Risk engine: `mt5_configure_risk_guard`, kill-switch blocking new orders,
-  auto `CLOSE_ALL` on TP/SL triggers.
-- Error handling: unknown method (`-32601`), unknown tool (`isError: true`),
-  missing required args.
-- Persistence: `/api/database/analytics`, `/api/database/orders`,
-  `/api/database/download`, `/api/ea/code`, `/api/simulate-tick`.
+---
 
-## Also available in the UI
+## ⚡ 2. Instant AI CLI Shortcuts (`cli.js`)
+An AI or terminal user can run high-level trading and market commands with no JSON boilerplate:
 
-The **AI MCP Hub** tab in the web app has an in-app "Execute Tool via MCP"
-tester and copy-paste snippets for Claude Desktop, Cursor IDE, and a Python
-agent — see `src/components/mcp/McpConsole.tsx`. Those snippets point at the
-same endpoints these scripts exercise.
+```bash
+# 1. Inspect live account equity, balance & active chart
+node backend/mcp-tool/cli.js status
+
+# 2. Get real-time bid, ask, spread, and session range for any symbol
+node backend/mcp-tool/cli.js quote EURUSD
+
+# 3. List open MT5 positions
+node backend/mcp-tool/cli.js positions
+
+# 4. List pending orders (Limit & Stop orders)
+node backend/mcp-tool/cli.js orders
+
+# 5. Execute AI-directed BUY or SELL order with Stop Loss & Take Profit
+node backend/mcp-tool/cli.js buy EURUSD 0.01 1.0820 1.0920 "AI_ENTRY"
+node backend/mcp-tool/cli.js sell XAUUSD 0.05 2640.50 2615.00 "MOMENTUM_SHORT"
+
+# 6. Close an open position ticket
+node backend/mcp-tool/cli.js close 123456
+
+# 7. Cancel a pending order ticket
+node backend/mcp-tool/cli.js cancel 789101
+
+# 8. Compute technical indicators (RSI, EMA, MACD, Bollinger, summary)
+node backend/mcp-tool/cli.js indicators EURUSD M1
+
+# 9. Fetch past OHLCV chart candles
+node backend/mcp-tool/cli.js candles EURUSD M1 50
+
+# 10. Purge 24-hour unexecuted orders & trim database
+node backend/mcp-tool/cli.js prune
+```
+
+---
+
+## 🛠️ 3. Standard MCP Protocol Invocation
+You can still query tool definitions or run raw JSON-RPC:
+
+```bash
+# List all 21 MCP tool definitions
+node backend/mcp-tool/cli.js list
+
+# Call any tool by name with JSON payload
+node backend/mcp-tool/cli.js call mt5_get_account_info '{}'
+node backend/mcp-tool/cli.js call mt5_get_chart_history '{"symbol":"EURUSD","timeframe":"M1","limit":50}'
+
+# Execute raw JSON-RPC method
+node backend/mcp-tool/cli.js rpc tools/list '{}'
+```
+
+---
+
+## 🧪 4. SSE Network Tests
+- `node backend/mcp-tool/sse.js`: Minimal raw socket test connecting to `GET /api/mcp/sse`.
+- `node backend/mcp-tool/sse-roundtrip.js`: Full Server-Sent Events round-trip testing session initialization and message handling.

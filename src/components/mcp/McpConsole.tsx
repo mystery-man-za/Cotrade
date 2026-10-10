@@ -33,7 +33,23 @@ export const McpConsole: React.FC = () => {
   const [testResult, setTestResult] = useState<any>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [copiedConfig, setCopiedConfig] = useState(false);
-  const [configType, setConfigType] = useState<'claude' | 'cursor' | 'python'>('claude');
+  const [configType, setConfigType] = useState<'claude' | 'stdio' | 'cli' | 'cursor' | 'python'>('stdio');
+
+  const stdioConfig = JSON.stringify(
+    {
+      mcpServers: {
+        'mt5-bridge': {
+          command: 'node',
+          args: ['backend/mcp-tool/stdio.js'],
+          env: {
+            MCP_URL: 'http://127.0.0.1:3000/api/mcp',
+          },
+        },
+      },
+    },
+    null,
+    2
+  );
 
   const claudeDesktopConfig = JSON.stringify(
     {
@@ -46,6 +62,32 @@ export const McpConsole: React.FC = () => {
     null,
     2
   );
+
+  const cliSnippet = `# Fast AI CLI commands (backend/mcp-tool/cli.js)
+# 1. Inspect live status
+node backend/mcp-tool/cli.js status
+
+# 2. Get live quote & spread
+node backend/mcp-tool/cli.js quote EURUSD
+
+# 3. List active positions & pending orders
+node backend/mcp-tool/cli.js positions
+node backend/mcp-tool/cli.js orders
+
+# 4. Instant trade dispatch with SL/TP
+node backend/mcp-tool/cli.js buy EURUSD 0.10 1.0820 1.0920 "AI_ENTRY"
+node backend/mcp-tool/cli.js sell XAUUSD 0.05 2640.50 2615.00 "MOMENTUM"
+
+# 5. Close position or cancel pending order
+node backend/mcp-tool/cli.js close 123456
+node backend/mcp-tool/cli.js cancel 789101
+
+# 6. Technical indicators & chart history
+node backend/mcp-tool/cli.js indicators EURUSD M1
+node backend/mcp-tool/cli.js candles EURUSD M1 60
+
+# 7. Purge 24h+ unexecuted orders from database
+node backend/mcp-tool/cli.js prune`;
 
   const pythonSnippet = `# Connect your External Python AI Agent to MT5 Bridge MCP endpoint
 import requests
@@ -89,8 +131,8 @@ print("Asynchronous Order Dispatched to EA:", trade_res)
     {
       mcpServers: {
         'mt5-ai-bridge': {
-          url: 'http://127.0.0.1:3000/api/mcp/sse',
-          transport: 'sse',
+          command: 'node',
+          args: ['backend/mcp-tool/stdio.js'],
         },
       },
     },
@@ -308,7 +350,27 @@ print("Asynchronous Order Dispatched to EA:", trade_res)
               </div>
 
               {/* Snippet Type Selector */}
-              <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
+              <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800 flex-wrap">
+                <button
+                  onClick={() => setConfigType('stdio')}
+                  className={`px-2.5 py-1 rounded text-xs font-mono transition-colors ${
+                    configType === 'stdio'
+                      ? 'bg-slate-800 text-cyan-300 font-bold'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  Stdio MCP (stdio.js)
+                </button>
+                <button
+                  onClick={() => setConfigType('cli')}
+                  className={`px-2.5 py-1 rounded text-xs font-mono transition-colors ${
+                    configType === 'cli'
+                      ? 'bg-slate-800 text-cyan-300 font-bold'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  CLI Shortcuts (cli.js)
+                </button>
                 <button
                   onClick={() => setConfigType('claude')}
                   className={`px-2.5 py-1 rounded text-xs font-mono transition-colors ${
@@ -317,7 +379,7 @@ print("Asynchronous Order Dispatched to EA:", trade_res)
                       : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >
-                  Claude Desktop
+                  Claude Desktop (SSE)
                 </button>
                 <button
                   onClick={() => setConfigType('cursor')}
@@ -344,7 +406,11 @@ print("Asynchronous Order Dispatched to EA:", trade_res)
 
             <div className="relative">
               <pre className="bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs font-mono text-slate-300 overflow-x-auto max-h-64">
-                {configType === 'claude'
+                {configType === 'stdio'
+                  ? stdioConfig
+                  : configType === 'cli'
+                  ? cliSnippet
+                  : configType === 'claude'
                   ? claudeDesktopConfig
                   : configType === 'cursor'
                   ? cursorSnippet
@@ -353,7 +419,11 @@ print("Asynchronous Order Dispatched to EA:", trade_res)
               <button
                 onClick={() =>
                   copyConfigSnippet(
-                    configType === 'claude'
+                    configType === 'stdio'
+                      ? stdioConfig
+                      : configType === 'cli'
+                      ? cliSnippet
+                      : configType === 'claude'
                       ? claudeDesktopConfig
                       : configType === 'cursor'
                       ? cursorSnippet

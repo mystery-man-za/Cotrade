@@ -194,23 +194,48 @@ print("Order Queued:", order)
 
 ---
 
-## 🧰 Available MCP Tools
+## 🧰 Available MCP Tools (21 Comprehensive Tools)
 
 | Tool Name | Description |
 | :--- | :--- |
 | `mt5_get_account_info` | Retrieves balance, equity, margin, free margin, margin level %, currency, and floating PnL. |
-| `mt5_get_current_chart` | Returns the active symbol and timeframe the EA is running on, along with contract specifications. |
-| `mt5_get_all_symbols` | Returns quotes, spreads, and broker lot rules for all symbols tracked by the EA. |
-| `mt5_get_market_data` | Live bid, ask, spread, and 24h high/low for tracked symbols. |
-| `mt5_get_open_positions` | Open tickets, volume, open price, SL, TP, profit, and magic numbers. |
-| `mt5_execute_trade` | Asynchronously dispatches `BUY` or `SELL` orders with lots, SL, TP, and AI comments. |
+| `mt5_get_current_chart` | Returns the active symbol and timeframe the EA is running on, along with broker specifications and session aggregates. |
+| `mt5_get_all_symbols` | Returns quotes, spreads, session range, and broker lot rules for all symbols tracked by the EA. |
+| `mt5_get_market_data` | Live bid, ask, spread, volume, and 24h high/low for tracked symbols. |
+| `mt5_get_open_positions` | Open tickets, volume, open price, SL, TP, floating profit, and magic numbers. |
+| `mt5_execute_trade` | Asynchronously dispatches `BUY`, `SELL`, `BUY_LIMIT`, `SELL_LIMIT`, `BUY_STOP`, `SELL_STOP` orders. |
 | `mt5_modify_position` | Adjusts Stop Loss and Take Profit levels for an open position ticket. |
 | `mt5_close_position` | Closes full or partial lot volume for a specific ticket. |
 | `mt5_close_all` | Liquidates all open positions or all positions for a specific symbol. |
-| `mt5_configure_risk_guard` | Granularly updates global dollar TP/SL, max lot sizes, and trailing stop distance. |
-| `mt5_get_execution_queue` | Inspects in-flight commands (`pending` → `dispatched` → `executed` / `failed`). |
+| `mt5_get_pending_orders` | Retrieves all active pending limit & stop orders in MT5. |
+| `mt5_cancel_pending_order` | Cancels an active pending order ticket in MT5. |
+| `mt5_get_chart_history` | Returns multi-timeframe OHLCV candles (M1, M5, M15, H1, H4, D1) with precomputed technical indicators. |
+| `mt5_get_technical_indicators` | Precalculated RSI(14), EMA(9, 21, 50, 200), SMA(20, 50), MACD(12,26,9), Bollinger Bands, ATR(14), and consensus summary. |
+| `mt5_request_chart_history` | Triggers an on-demand historical candle pull from MT5 for any symbol and timeframe. |
+| `mt5_get_tick_history` | Retrieves persisted sub-second tick stream data from SQLite database. |
+| `mt5_get_account_history` | Queries historical equity & balance snapshots persisted over time. |
 | `mt5_query_trade_history` | Queries historical trade orders from the persistent SQLite database. |
 | `mt5_get_performance_analytics` | Retrieves execution success rate, order counts, and database storage metrics. |
+| `mt5_configure_risk_guard` | Granularly updates global dollar TP/SL, max lot sizes, and trailing stop distance. |
+| `mt5_get_execution_queue` | Inspects in-flight commands (`pending` → `dispatched` → `executed` / `failed`). |
+| `mt5_simulate_candles` | Seeds synthetic historical OHLCV data & indicators for instant testing and backtesting without waiting for live ticks. |
+
+---
+
+## 🌐 REST Endpoints
+
+- `GET /api/state` - Complete real-time snapshot of connection, account, positions, ticks, orders, and chart
+- `POST /api/commands` - Enqueue an order for execution in MT5 (`EXECUTE_TRADE`, `MODIFY_POSITION`, `CLOSE_POSITION`, `CLOSE_ALL`, `CANCEL_PENDING`)
+- `GET /api/database/candles` - Query stored candles by symbol (`?symbol=EURUSD&timeframe=M1&limit=100`)
+- `GET /api/database/ticks` - Query stored ticks by symbol (`?symbol=EURUSD&limit=100`)
+- `GET /api/database/account-history` - Query stored equity/balance snapshots (`?limit=50`)
+- `GET /api/database/orders` - Query order execution audit history
+- `POST /api/candles/simulate` - Seed synthetic candles and indicators for testing
+- `POST /api/candles/request` - Request EA to pull historical bars for a symbol and timeframe
+- `GET /api/mcp/tools` - List all 21 MCP tool schemas
+- `POST /api/mcp` - JSON-RPC 2.0 direct MCP tool execution
+- `GET /api/mcp/sse` - Server-Sent Events transport for Claude Desktop / Cursor
+- `POST /sync` / `POST /api/mt5/sync` - High-frequency MT5 EA synchronization loop (500ms)
 
 ---
 
